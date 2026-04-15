@@ -8,28 +8,45 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
 // SubprocessTransport implements Transport by spawning the Claude CLI as a subprocess.
 type SubprocessTransport struct {
-	opts      *ClaudeAgentOptions
-	cmd       *exec.Cmd
-	stdin     io.WriteCloser
-	stdout    io.ReadCloser
-	stderr    io.ReadCloser
-	ready     bool
-	mu        sync.Mutex
-	closeOnce sync.Once
+	opts             *ClaudeAgentOptions
+	cmd              *exec.Cmd
+	stdin            io.WriteCloser
+	stdout           io.ReadCloser
+	stderr           io.ReadCloser
+	ready            bool
+	initTimeout      time.Duration
+	mu               sync.Mutex
+	closeOnce        sync.Once
 }
 
 // NewSubprocessTransport creates a new subprocess transport.
 func NewSubprocessTransport(opts *ClaudeAgentOptions) *SubprocessTransport {
-	return &SubprocessTransport{opts: opts}
+	t := &SubprocessTransport{opts: opts, initTimeout: 60 * time.Second}
+
+	// Read CLAUDE_CODE_STREAM_CLOSE_TIMEOUT from environment or opts.Env
+	if timeoutStr := opts.Env[CLAUDE_CODE_STREAM_CLOSE_TIMEOUT]; timeoutStr != "" {
+		if ms, err := strconv.Atoi(timeoutStr); err == nil && ms > 0 {
+			t.initTimeout = time.Duration(ms) * time.Millisecond
+		}
+	} else if timeoutStr := os.Getenv(CLAUDE_CODE_STREAM_CLOSE_TIMEOUT); timeoutStr != "" {
+		if ms, err := strconv.Atoi(timeoutStr); err == nil && ms > 0 {
+			t.initTimeout = time.Duration(ms) * time.Millisecond
+		}
+	}
+
+	return t
 }
 
 // findClaudeBinary locates the claude CLI binary.
@@ -55,6 +72,10 @@ func findClaudeBinary(customPath string) (string, error) {
 	home, _ := os.UserHomeDir()
 	knownPaths := []string{
 		filepath.Join(home, ".claude", "local", "claude"),
+		filepath.Join(home, ".npm-global", "bin", "claude"),
+		filepath.Join(home, ".local", "bin", "claude"),
+		filepath.Join(home, "node_modules", ".bin", "claude"),
+		filepath.Join(home, ".yarn", "bin", "claude"),
 		"/usr/local/bin/claude",
 		"/usr/bin/claude",
 	}
@@ -167,6 +188,20 @@ func buildArgs(opts *ClaudeAgentOptions) []string {
 		args = append(args, "--setting-source", string(source))
 	}
 
+	// Tools option
+	if opts.Tools != nil {
+		switch v := opts.Tools.(type) {
+		case []string:
+			if len(v) > 0 {
+				args = append(args, "--tools", strings.Join(v, ","))
+			}
+		case string:
+			if v != "" {
+				args = append(args, "--tools", v)
+			}
+		}
+	}
+
 	if opts.Thinking != nil {
 		switch opts.Thinking.Type {
 		case "disabled":
@@ -181,7 +216,11 @@ func buildArgs(opts *ClaudeAgentOptions) []string {
 		args = append(args, "--effort", string(*opts.Effort))
 	}
 	if opts.OutputFormat != nil {
-		if j, err := json.Marshal(opts.OutputFormat); err == nil {
+		if opts.OutputFormat.Schema != nil {
+			if j, err := json.Marshal(opts.OutputFormat.Schema); err == nil {
+				args = append(args, "--json-schema", string(j))
+			}
+		} else if j, err := json.Marshal(opts.OutputFormat); err == nil {
 			args = append(args, "--output-format-json", string(j))
 		}
 	}
@@ -291,6 +330,21 @@ func (t *SubprocessTransport) Connect(ctx context.Context) error {
 	args = append(args, "--input-format", "stream-json", "--output-format", "stream-json", "-p", "-")
 
 	t.cmd = exec.CommandContext(ctx, binary, args...)
+
+	// Set process user if specified (Unix only)
+	if t.opts.User != "" && runtime.GOOS != "windows" {
+		u, err := user.Lookup(t.opts.User)
+		if err == nil {
+			uid, _ := strconv.ParseUint(u.Uid, 10, 32)
+			gid, _ := strconv.ParseUint(u.Gid, 10, 32)
+			t.cmd.SysProcAttr = &syscall.SysProcAttr{
+				Credential: &syscall.Credential{
+					Uid: uint32(uid),
+					Gid: uint32(gid),
+				},
+			}
+		}
+	}
 
 	// Set environment
 	env := os.Environ()
@@ -475,6 +529,11 @@ func (t *SubprocessTransport) IsReady() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.ready
+}
+
+// InitTimeout returns the configured initialization timeout.
+func (t *SubprocessTransport) InitTimeout() time.Duration {
+	return t.initTimeout
 }
 
 // EndInput closes the stdin pipe.

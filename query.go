@@ -255,6 +255,10 @@ func (q *queryHandler) handleControlRequest(raw json.RawMessage) {
 		q.handleHookCallback(ctx, req.RequestID, req.Request.CallbackID,
 			req.Request.Input, req.Request.ToolUseID)
 
+	case "control_cancel_request":
+		// Acknowledge the cancellation — nothing to cancel on the SDK side
+		q.sendControlResponse(ctx, req.RequestID, map[string]any{"acknowledged": true})
+
 	default:
 		// Send default response for unhandled requests
 		q.sendControlResponse(ctx, req.RequestID, map[string]any{})

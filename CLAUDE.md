@@ -26,6 +26,8 @@ This is an SDK project which is similar to the official https://github.com/anthr
    - Any other relevant information that users might find helpful.
 10. by the way, claude code source code is under ../
 11. make every environment variable configurable, and provide a way to set them easily, and provide/exported them with `const CLAUDE_CODE_XXXXX = "CLAUDE_CODE_XXXXX"` in the code. 
+12. claude code leaked source code is under ./claude-code, which is ignored by .gitignore, you can refer it for the implementation details, but do not copy the code directly, you should write your own code based on your understanding of the python sdk and the leaked source code.
+13. for 11., you can add more claude code mentioned environment variables, and provide a way to set them easily, such as a bundle of constants which same as the environment variable names.
 
 
 ## Tasks
@@ -40,15 +42,21 @@ This is an SDK project which is similar to the official https://github.com/anthr
 8. [x] Pipeline (pipeline.go) - Sequential agent composition
 9. [x] Parallel (parallel.go) - Concurrent agent execution
 10. [x] Mock transport (mock_transport.go) - Test infrastructure
-11. [x] Examples (examples/) - quickstart, pipeline, multiagent
-12. [x] Environment variable constants (env.go) - `const CLAUDE_CODE_XXX` for all env vars
+11. [x] Examples (examples/) - quickstart, pipeline, multiagent, streaming, calculator, codereview, tooluse
+12. [x] Environment variable constants (env.go) - 70+ `const CLAUDE_CODE_XXX` for all env vars (API, auth, provider, session, features, model, sandbox, MCP, bash, proxy, telemetry)
 13. [x] Missing types (types.go) - TaskStartedMessage, TaskProgressMessage, TaskNotificationMessage, StreamEvent, RateLimitInfo (full), ContextUsage, TaskBudget, SdkBeta, SystemPromptPreset, HookInput types, HookSpecificOutput types
 14. [x] Enhanced message parser (message_parser.go) - Handle task_started/task_progress/task_notification system subtypes, stream_event, forward-compatible nil for unknown types
 15. [x] Hook callback routing (query.go) - Wire hook_callback control requests, route to HookCallbackMatcher, serialize HookJSONOutput with hookSpecificOutput
 16. [x] Session management (sessions.go) - ListSessions, GetSessionInfo, GetSessionMessages, RenameSession, TagSession, DeleteSession, ForkSession
 17. [x] Client enhancements (client.go) - RewindFiles, ReconnectMcpServer, ToggleMcpServer, StopTask, GetContextUsage, GetServerInfo
-18. [x] Complete buildArgs (subprocess_transport.go) - All options map to CLI flags including --task-budget, --plugin-dir, --system-prompt, --settings, --sandbox
-19. [x] Comprehensive tests - 61% coverage: sessions_test.go, transport_test.go, sdk_test.go (new type/parser tests), agent_test.go, pipeline_test.go, parallel_test.go
+18. [x] Complete buildArgs (subprocess_transport.go) - All options map to CLI flags including --task-budget, --plugin-dir, --system-prompt, --settings, --sandbox, --tools, --json-schema
+19. [x] Comprehensive tests - sessions_test.go, transport_test.go, sdk_test.go, agent_test.go, pipeline_test.go, parallel_test.go
 20. [x] README.md - Installation, usage, examples, configuration reference, project structure
-21. [x] docs/ directory - API reference, architecture, hook system guide, session management guide
+21. [x] docs/ directory - API reference (api-reference.md), architecture (architecture.md), hook system guide (hooks.md), session management guide (sessions.md)
+22. [x] Wire Tools option in buildArgs - Tools field now maps to --tools CLI flag
+23. [x] Wire User option in subprocess - SysProcAttr sets UID/GID on Unix when User is specified
+24. [x] Read CLAUDE_CODE_STREAM_CLOSE_TIMEOUT - Transport reads timeout from env/opts for init handshake
+25. [x] Handle control_cancel_request in query.go - Acknowledge cancellation requests from CLI
+26. [x] Fix --json-schema handling - OutputFormat.Schema uses --json-schema, fallback to --output-format-json
+27. [x] Add CLI search paths - npm-global, .local/bin, node_modules, .yarn/bin
 

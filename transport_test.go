@@ -503,17 +503,32 @@ func TestBuildArgs_OutputFormatJSON(t *testing.T) {
 		},
 	})
 
-	raw := argValue(args, "--output-format-json")
+	// When Schema is present, --json-schema is used
+	raw := argValue(args, "--json-schema")
 	if raw == "" {
-		t.Fatal("expected --output-format-json flag")
+		t.Fatal("expected --json-schema flag when Schema is present")
 	}
 
-	var parsed OutputFormat
+	var parsed map[string]any
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
-		t.Fatalf("failed to parse output-format-json: %v", err)
+		t.Fatalf("failed to parse json-schema: %v", err)
 	}
-	if parsed.Type != OutputFormatJSONSchema {
-		t.Errorf("output format type = %q, want %q", parsed.Type, OutputFormatJSONSchema)
+	if parsed["type"] != "object" {
+		t.Errorf("schema type = %v, want %q", parsed["type"], "object")
+	}
+}
+
+func TestBuildArgs_OutputFormatJSONNoSchema(t *testing.T) {
+	args := buildArgs(&ClaudeAgentOptions{
+		OutputFormat: &OutputFormat{
+			Type: OutputFormatJSONSchema,
+		},
+	})
+
+	// When Schema is nil, fallback to --output-format-json
+	raw := argValue(args, "--output-format-json")
+	if raw == "" {
+		t.Fatal("expected --output-format-json flag when Schema is nil")
 	}
 }
 
