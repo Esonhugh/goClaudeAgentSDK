@@ -13,3 +13,4 @@
 
 python-sdk/
 claude-code/
+.env
