@@ -156,22 +156,34 @@ func (q *queryHandler) initialize(ctx context.Context) (*InitializeResponse, err
 		return nil, fmt.Errorf("initialize handshake failed: %w", err)
 	}
 
-	var controlResp struct {
-		Subtype  string              `json:"subtype"`
-		Response *InitializeResponse `json:"response,omitempty"`
-		Error    string              `json:"error,omitempty"`
+	// sendControlRequest returns the full control_response envelope:
+	// {"type":"control_response","response":{"subtype":"...","request_id":"...","response":{...}}}
+	// We need to unwrap to the inner "response" object first.
+	var envelope struct {
+		Response struct {
+			Subtype  string          `json:"subtype"`
+			Response json.RawMessage `json:"response,omitempty"`
+			Error    string          `json:"error,omitempty"`
+		} `json:"response"`
 	}
-	if err := json.Unmarshal(resp, &controlResp); err != nil {
+	if err := json.Unmarshal(resp, &envelope); err != nil {
 		return nil, fmt.Errorf("failed to parse initialize response: %w", err)
 	}
 
-	if controlResp.Subtype == "error" {
-		return nil, fmt.Errorf("initialize error: %s", controlResp.Error)
+	if envelope.Response.Subtype == "error" {
+		return nil, fmt.Errorf("initialize error: %s", envelope.Response.Error)
+	}
+
+	var initResp InitializeResponse
+	if len(envelope.Response.Response) > 0 {
+		if err := json.Unmarshal(envelope.Response.Response, &initResp); err != nil {
+			return nil, fmt.Errorf("failed to parse initialize response body: %w", err)
+		}
 	}
 
 	q.initialized = true
-	q.initResult = controlResp.Response
-	return controlResp.Response, nil
+	q.initResult = &initResp
+	return &initResp, nil
 }
 
 // routeMessage handles control responses and routes data messages.
@@ -480,15 +492,22 @@ func (q *queryHandler) mcpServerStatus(ctx context.Context) ([]McpServerStatus, 
 	if err != nil {
 		return nil, err
 	}
-	var controlResp struct {
+	// Unwrap the control_response envelope
+	var envelope struct {
 		Response struct {
-			Response []McpServerStatus `json:"response"`
+			Response json.RawMessage `json:"response"`
 		} `json:"response"`
 	}
-	if err := json.Unmarshal(resp, &controlResp); err != nil {
+	if err := json.Unmarshal(resp, &envelope); err != nil {
 		return nil, err
 	}
-	return controlResp.Response.Response, nil
+	var statuses []McpServerStatus
+	if len(envelope.Response.Response) > 0 {
+		if err := json.Unmarshal(envelope.Response.Response, &statuses); err != nil {
+			return nil, err
+		}
+	}
+	return statuses, nil
 }
 
 // contextUsage queries context window usage breakdown.
@@ -497,15 +516,22 @@ func (q *queryHandler) contextUsage(ctx context.Context) (*ContextUsageResponse,
 	if err != nil {
 		return nil, err
 	}
-	var controlResp struct {
+	// Unwrap the control_response envelope
+	var envelope struct {
 		Response struct {
-			Response *ContextUsageResponse `json:"response"`
+			Response json.RawMessage `json:"response"`
 		} `json:"response"`
 	}
-	if err := json.Unmarshal(resp, &controlResp); err != nil {
+	if err := json.Unmarshal(resp, &envelope); err != nil {
 		return nil, err
 	}
-	return controlResp.Response.Response, nil
+	var usage ContextUsageResponse
+	if len(envelope.Response.Response) > 0 {
+		if err := json.Unmarshal(envelope.Response.Response, &usage); err != nil {
+			return nil, err
+		}
+	}
+	return &usage, nil
 }
 
 // rewindFiles reverts files to their state at the given user message ID.

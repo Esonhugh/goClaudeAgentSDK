@@ -210,3 +210,80 @@ func TestAgent_Run_ContextCancel(t *testing.T) {
 		t.Errorf("unexpected text: %q", result.Text)
 	}
 }
+
+// --- Agent.StartSession tests ---
+
+func TestAgent_StartSession_Basic(t *testing.T) {
+	msgs := QuickMockMessages("session reply", 0.005)
+	mt := NewMockTransport(msgs...)
+
+	agent := NewAgent(AgentConfig{
+		Name:             "session-agent",
+		TransportFactory: MockTransportFactory(mt),
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	client, err := agent.StartSession(ctx)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	defer client.Close()
+
+	// Verify the client is connected
+	info := client.GetServerInfo()
+	if info == nil {
+		t.Fatal("expected non-nil server info from session")
+	}
+
+	// Send a query and receive the response
+	if err := client.SendQuery(ctx, "hello session"); err != nil {
+		t.Fatalf("SendQuery: %v", err)
+	}
+
+	var gotText string
+	var gotResult bool
+	for msg := range client.ReceiveResponse(ctx) {
+		switch m := msg.(type) {
+		case AssistantMessage:
+			gotText = GetTextContent(m)
+		case ResultMessage:
+			gotResult = true
+			if m.CostUSD != 0.005 {
+				t.Errorf("expected cost 0.005, got %f", m.CostUSD)
+			}
+		}
+	}
+	if gotText != "session reply" {
+		t.Errorf("expected 'session reply', got %q", gotText)
+	}
+	if !gotResult {
+		t.Error("did not receive result message")
+	}
+}
+
+func TestAgent_StartSession_GetInitResult(t *testing.T) {
+	mt := NewMockTransport(QuickMockMessages("ok", 0.001)...)
+	agent := NewAgent(AgentConfig{
+		Name:             "init-check",
+		TransportFactory: MockTransportFactory(mt),
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	client, err := agent.StartSession(ctx)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	defer client.Close()
+
+	result := client.GetInitResult()
+	if result == nil {
+		t.Fatal("expected non-nil init result from StartSession")
+	}
+	if result.Account.Email != "test@example.com" {
+		t.Errorf("expected email test@example.com, got %q", result.Account.Email)
+	}
+}

@@ -1033,10 +1033,11 @@ type ClaudeAgentOptions struct {
 	MaxBufferSize *int `json:"maxBufferSize,omitempty"`
 
 	// Callbacks (not serialized - Go-side only)
-	CanUseTool    CanUseToolFunc                      `json:"-"`
-	OnElicitation OnElicitationFunc                   `json:"-"`
-	Stderr        func(data string)                   `json:"-"`
-	HookCallbacks map[HookEvent][]HookCallbackMatcher `json:"-"`
+	CanUseTool       CanUseToolFunc                           `json:"-"`
+	OnElicitation    OnElicitationFunc                        `json:"-"`
+	Stderr           func(data string)                        `json:"-"`
+	HookCallbacks    map[HookEvent][]HookCallbackMatcher      `json:"-"`
+	TransportFactory func(opts *ClaudeAgentOptions) Transport `json:"-"`
 }
 
 // CanUseToolFunc is the Go callback type for permission decisions.

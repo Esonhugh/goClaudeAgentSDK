@@ -43,7 +43,10 @@ func Query(ctx context.Context, prompt string, opts *ClaudeAgentOptions) (<-chan
 		defer close(msgCh)
 		defer close(errCh)
 
-		transport := NewSubprocessTransport(opts)
+		var transport Transport = NewSubprocessTransport(opts)
+		if opts.TransportFactory != nil {
+			transport = opts.TransportFactory(opts)
+		}
 		defer transport.Close()
 
 		if err := transport.Connect(ctx); err != nil {

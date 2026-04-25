@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 )
 
 // --- Message Parser Tests ---
@@ -862,5 +863,77 @@ func TestResultMessage_BothCostFields(t *testing.T) {
 	}
 	if rm.CostUSD != 0.009 {
 		t.Errorf("expected CostUSD 0.009 (total_cost_usd wins), got %f", rm.CostUSD)
+	}
+}
+
+// --- Query() function tests ---
+
+func TestQuery_Basic(t *testing.T) {
+	msgs := QuickMockMessages("France's capital is Paris.", 0.003)
+	mt := NewMockTransport(msgs...)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	msgCh, errCh := Query(ctx, "What is the capital of France?", &ClaudeAgentOptions{
+		TransportFactory: MockTransportFactory(mt),
+	})
+
+	var gotText string
+	var gotResult bool
+	for {
+		select {
+		case msg, ok := <-msgCh:
+			if !ok {
+				if !gotResult {
+					t.Fatal("message channel closed without result")
+				}
+				goto done
+			}
+			switch m := msg.(type) {
+			case AssistantMessage:
+				gotText = GetTextContent(m)
+			case ResultMessage:
+				gotResult = true
+				if m.CostUSD != 0.003 {
+					t.Errorf("expected cost 0.003, got %f", m.CostUSD)
+				}
+			}
+		case err, ok := <-errCh:
+			if ok && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		case <-ctx.Done():
+			t.Fatal("timeout waiting for query response")
+		}
+		if gotResult {
+			break
+		}
+	}
+done:
+	if gotText != "France's capital is Paris." {
+		t.Errorf("expected text about Paris, got %q", gotText)
+	}
+}
+
+func TestQuery_NilOptions(t *testing.T) {
+	// Query with nil opts should not panic (it creates default opts).
+	// We can't really test the subprocess path here without a real binary,
+	// but we can verify it doesn't panic before transport.Connect fails.
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	_, errCh := Query(ctx, "test", nil)
+	// Should get an error (CLI not found or timeout), not a panic
+	select {
+	case err := <-errCh:
+		if err == nil {
+			// If somehow it works (unlikely), that's also fine
+			return
+		}
+		// Got an error, which is expected since claude binary may not be on PATH
+		// for unit tests or the context times out
+	case <-ctx.Done():
+		// Context timeout is also acceptable
 	}
 }

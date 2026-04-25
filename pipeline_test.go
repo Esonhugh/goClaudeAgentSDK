@@ -3,9 +3,28 @@ package claudesdk
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 )
+
+// failTransport always fails on Connect.
+type failTransport struct{}
+
+func (f *failTransport) Connect(ctx context.Context) error {
+	return fmt.Errorf("simulated connect failure")
+}
+func (f *failTransport) Write(ctx context.Context, data string) error { return nil }
+func (f *failTransport) ReadMessages(ctx context.Context) (<-chan json.RawMessage, <-chan error) {
+	ch := make(chan json.RawMessage)
+	close(ch)
+	errCh := make(chan error)
+	close(errCh)
+	return ch, errCh
+}
+func (f *failTransport) Close() error    { return nil }
+func (f *failTransport) IsReady() bool   { return false }
+func (f *failTransport) EndInput() error { return nil }
 
 func TestPipeline_TwoSteps(t *testing.T) {
 	// Step 1 agent: echoes back with "Step1: " prefix
@@ -86,7 +105,7 @@ func TestPipeline_ThreeSteps(t *testing.T) {
 	for i, m := range mocks {
 		mt := NewMockTransport(QuickMockMessages(m.text, m.cost)...)
 		steps = append(steps, PipelineStep{
-			Name:  m.text,
+			Name: m.text,
 			Agent: NewAgent(AgentConfig{
 				Name:             m.text,
 				TransportFactory: MockTransportFactory(mt),
@@ -172,5 +191,99 @@ func TestPipeline_ContextCancel(t *testing.T) {
 	// Should have at least partial result
 	if result == nil {
 		t.Fatal("expected non-nil result even on cancel")
+	}
+}
+
+func TestPipeline_StepError_StopsExecution(t *testing.T) {
+	// Step 1: succeeds
+	step1MT := NewMockTransport(QuickMockMessages("step1 done", 0.001)...)
+	step1Agent := NewAgent(AgentConfig{
+		Name:             "ok-step",
+		TransportFactory: MockTransportFactory(step1MT),
+	})
+
+	// Step 2: uses a transport that fails on connect
+	step2Agent := NewAgent(AgentConfig{
+		Name: "fail-step",
+		TransportFactory: func(opts *ClaudeAgentOptions) Transport {
+			return &failTransport{}
+		},
+	})
+
+	// Step 3: should never execute
+	step3MT := NewMockTransport(QuickMockMessages("should not reach", 0.001)...)
+	step3Agent := NewAgent(AgentConfig{
+		Name:             "unreachable",
+		TransportFactory: MockTransportFactory(step3MT),
+	})
+
+	pipeline := NewPipeline(
+		PipelineStep{Name: "first", Agent: step1Agent},
+		PipelineStep{Name: "broken", Agent: step2Agent},
+		PipelineStep{Name: "third", Agent: step3Agent},
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	result, err := pipeline.Run(ctx, "start")
+
+	// Pipeline should return error from the broken step
+	if err == nil {
+		t.Fatal("expected error from pipeline with broken step")
+	}
+
+	// Should have results from steps that ran (first completed, second failed)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if len(result.StepResults) > 2 {
+		t.Errorf("expected at most 2 step results (step 3 should not run), got %d", len(result.StepResults))
+	}
+	// First step should have succeeded
+	if len(result.StepResults) >= 1 && result.StepResults[0].Output != "step1 done" {
+		t.Errorf("expected first step output, got %q", result.StepResults[0].Output)
+	}
+}
+
+func TestPipeline_EmptyPipeline(t *testing.T) {
+	pipeline := NewPipeline() // no steps
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	result, err := pipeline.Run(ctx, "input")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.FinalOutput != "input" {
+		t.Errorf("empty pipeline should pass input through, got %q", result.FinalOutput)
+	}
+	if len(result.StepResults) != 0 {
+		t.Errorf("expected 0 step results, got %d", len(result.StepResults))
+	}
+}
+
+func TestPipeline_SingleStep(t *testing.T) {
+	mt := NewMockTransport(QuickMockMessages("single output", 0.002)...)
+	agent := NewAgent(AgentConfig{
+		Name:             "solo",
+		TransportFactory: MockTransportFactory(mt),
+	})
+
+	pipeline := NewPipeline(PipelineStep{Name: "only", Agent: agent})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	result, err := pipeline.Run(ctx, "go")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.FinalOutput != "single output" {
+		t.Errorf("expected 'single output', got %q", result.FinalOutput)
+	}
+	if result.TotalCostUSD != 0.002 {
+		t.Errorf("expected cost 0.002, got %f", result.TotalCostUSD)
 	}
 }
